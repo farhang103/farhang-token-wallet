@@ -1,12 +1,12 @@
 "use client";
-import "@rainbow-me/rainbowkit/styles.css";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount } from "wagmi";
+import "@rainbow-me/rainbowkit/styles.css";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useAccount } from "wagmi";
 
 export default function HomePage() {
-  const { isConnected, address } = useAccount();
+  const { isConnected } = useAccount();
   const router = useRouter();
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen items-center justify-center">
-      <div className="">
+      <div>
         <ConnectButton
           accountStatus={{
             smallScreen: "avatar",
