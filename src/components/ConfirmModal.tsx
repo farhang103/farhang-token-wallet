@@ -3,6 +3,7 @@ import { Button } from "~/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
@@ -32,11 +33,15 @@ const ConfirmModal = ({
 }: ConfirmModalProps) => {
   return (
     <Dialog open={openModal} onOpenChange={setOpenModal}>
-      <DialogContent className="max-w-md border-2 border-black p-1">
+      <DialogContent
+        className="max-w-md border-2 border-black p-1"
+        aria-describedby="confirm-modal-description"
+      >
         <DialogHeader>
           <DialogTitle className="-mt-3 px-3 pt-6 text-lg font-medium">
             Review send
           </DialogTitle>
+          <DialogDescription className="hidden" />
         </DialogHeader>
 
         <div className="flex flex-col gap-5 px-6">
@@ -55,7 +60,11 @@ const ConfirmModal = ({
             <span className="text-sm font-light">Network cost</span>
             <span className="text-sm font-light">
               {estimatedFeeUSD
-                ? `$${estimatedFeeUSD.toFixed(2)}`
+                ? `$${
+                    estimatedFeeUSD.toFixed(2) === "0.00"
+                      ? estimatedFeeUSD.toFixed(3)
+                      : estimatedFeeUSD.toFixed(2)
+                  }`
                 : "Calculating..."}
             </span>
           </div>
