@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useAccount } from "wagmi";
 import DisplayBalance from "~/components/DisplayBalance";
 import { Card } from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
 
 const DashboardPage = () => {
   const { isConnected } = useAccount();
@@ -20,23 +21,30 @@ const DashboardPage = () => {
   return (
     <div className="flex h-screen flex-col items-center justify-center">
       <div className="flex w-full max-w-md flex-col gap-4">
-        <ConnectButton
-          accountStatus={{
-            smallScreen: "avatar",
-            largeScreen: "address",
-          }}
-          chainStatus={{
-            smallScreen: "icon",
-            largeScreen: "icon",
-          }}
-          showBalance={{
-            smallScreen: false,
-            largeScreen: false,
-          }}
-        />
-        <Card className="w-full rounded-2xl">
-          <DisplayBalance />
-        </Card>
+        {isConnected ? (
+          <>
+            <ConnectButton
+              accountStatus={{
+                smallScreen: "avatar",
+                largeScreen: "address",
+              }}
+              chainStatus={{
+                smallScreen: "icon",
+                largeScreen: "icon",
+              }}
+              showBalance={{
+                smallScreen: false,
+                largeScreen: false,
+              }}
+            />
+
+            <Card className="w-full rounded-2xl">
+              <DisplayBalance />
+            </Card>
+          </>
+        ) : (
+          <Skeleton className="h-full w-full" />
+        )}
       </div>
     </div>
   );
