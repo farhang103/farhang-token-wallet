@@ -4,6 +4,7 @@ import { sepolia } from "wagmi/chains";
 import FarhangTokenABI from "~/abis/FarhangToken.json";
 import { env } from "~/env";
 import SendTokenForm from "./SendTokenForm";
+import { Abi } from "viem";
 const DisplayBalance = () => {
   const { address } = useAccount();
   const [balance, setBalance] = useState<string>("0");
@@ -44,7 +45,7 @@ const DisplayBalance = () => {
       </div>
       <SendTokenForm
         tokenAddress={tokenAddress}
-        tokenABI={tokenABI}
+        tokenABI={tokenABI as Abi}
         balance={result.data?.value ?? 0n}
       />
     </div>
