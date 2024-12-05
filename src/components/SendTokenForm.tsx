@@ -1,12 +1,16 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { encodeFunctionData, formatEther, isAddress, parseEther } from "viem";
+import {
+  Abi,
+  encodeFunctionData,
+  formatEther,
+  isAddress,
+  parseEther,
+} from "viem";
 import {
   useAccount,
-  useBlock,
-  useBlockNumber,
+  useEstimateFeesPerGas,
   useSendTransaction,
   useWaitForTransactionReceipt,
 } from "wagmi";
@@ -21,26 +25,15 @@ import {
   FormMessage,
 } from "~/components/ui/form";
 import { Input } from "~/components/ui/input";
+import { toast } from "~/hooks/use-toast";
+import { useGasFeeCalculation } from "~/hooks/useGasFeeCalculation";
 import ConfirmModal from "./ConfirmModal";
 
 interface SendTokensFormProps {
   tokenAddress: string;
-  tokenABI: any[];
+  tokenABI: Abi;
   balance: bigint;
 }
-
-const formSchema = z.object({
-  toAddress: z
-    .string()
-    .min(10, "Address is too short")
-    .startsWith("0x")
-    .refine((val) => isAddress(val), "Invalid address"),
-  amount: z
-    .string()
-    .nonempty("Amount is empty")
-    .refine((val) => !isNaN(Number(val)), "Must be a number")
-    .refine((val) => Number(val) >= 0, "Amount must be a positive number"),
-});
 
 const SendTokensForm: React.FC<SendTokensFormProps> = ({
   tokenAddress,
@@ -49,13 +42,36 @@ const SendTokensForm: React.FC<SendTokensFormProps> = ({
 }) => {
   const [toAddress, setToAddress] = useState("");
   const [amount, setAmount] = useState(0);
-  const [estimatedFeeUSD, setEstimatedFeeUSD] = useState<number | null>(null);
-  const [ethPrice, setEthPrice] = useState<number | null>(null);
   const [openModal, setOpenModal] = useState(false);
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const { chain } = useAccount();
+  const { data: feesPerGas } = useEstimateFeesPerGas();
+  const { maxFeePerGas, maxPriorityFeePerGas } = feesPerGas ?? {};
 
-  const gasLimit = BigInt(50000);
+  const { estimatedFeeUSD } = useGasFeeCalculation({
+    tokenAddress: tokenAddress as `0x${string}`,
+    tokenABI,
+    toAddress,
+    amount,
+  });
+
+  const formSchema = z.object({
+    toAddress: z
+      .string()
+      .nonempty("Address is empty")
+      .min(10, "Address is too short")
+      .startsWith("0x")
+      .refine((val) => isAddress(val), "Invalid address"),
+    amount: z
+      .string()
+      .nonempty("Amount is empty")
+      .refine((val) => !isNaN(Number(val)), "Must be a number")
+      .refine((val) => Number(val) > 0, "Amount must be greater than 0")
+      .refine(
+        (val) => Number(val) <= Number(formatEther(balance)),
+        "Insufficient balance",
+      ),
+  });
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -76,111 +92,16 @@ const SendTokensForm: React.FC<SendTokensFormProps> = ({
         setTxHash(data);
       },
       onError: (error) => {
-        console.error("Transaction failed:", error);
-        setOpenModal(false);
+        if (!error.message.includes("User denied transaction signature")) {
+          toast({
+            title: "Transaction failed",
+            description: error.message,
+            variant: "destructive",
+          });
+        }
       },
     },
   });
-
-  // Fetch ETH price in USD
-  const { data: ethPriceData } = useQuery({
-    queryKey: ["ethPrice"],
-    queryFn: async () => {
-      const response = await fetch(
-        "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
-      );
-      const data = await response.json();
-      return data.ethereum.usd;
-    },
-    enabled: true,
-    retry: 3,
-    refetchInterval: 60000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-  });
-
-  // Fetch gas price data from Blocknative Gas Estimator API
-  const { data: gasData } = useQuery({
-    queryKey: ["gasData"],
-    queryFn: async () => {
-      const response = await fetch(
-        "https://api.blocknative.com/gasprices/blockprices",
-      );
-      const data = await response.json();
-      const standardSpeed = data.blockPrices[0].estimatedPrices.find(
-        (p: any) => p.confidence === 70,
-      );
-      return {
-        maxFeePerGas: standardSpeed.maxFeePerGas,
-        maxPriorityFeePerGas: standardSpeed.maxPriorityFeePerGas,
-      };
-    },
-    enabled: true,
-    retry: 3,
-    refetchInterval: 15000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-  });
-
-  // Fetch the latest block to get baseFeePerGas
-  const { data: blockNumberData } = useBlockNumber({
-    watch: true,
-  });
-  const { data: blockData } = useBlock({
-    blockNumber: blockNumberData,
-  });
-
-  useEffect(() => {
-    if (ethPriceData) {
-      setEthPrice(ethPriceData);
-    }
-  }, [ethPriceData]);
-
-  useEffect(() => {
-    calculateGasFee();
-  }, [gasData, ethPrice, blockData]);
-
-  const calculateGasFee = () => {
-    if (
-      !gasData?.maxFeePerGas ||
-      !gasData?.maxPriorityFeePerGas ||
-      !ethPrice ||
-      !blockData?.baseFeePerGas
-    ) {
-      setEstimatedFeeUSD(null);
-      return;
-    }
-
-    try {
-      const BUFFER_MULTIPLIER = 115n; // 15% buffer
-      const HUNDRED_PERCENT = 100n;
-
-      const baseFeePerGasWei = blockData.baseFeePerGas;
-
-      const maxPriorityFeePerGasWei =
-        (BigInt(Math.round(gasData.maxPriorityFeePerGas * 1e9)) *
-          BUFFER_MULTIPLIER) /
-        HUNDRED_PERCENT;
-      const maxFeePerGasWei =
-        (BigInt(Math.round(gasData.maxFeePerGas * 1e9)) * BUFFER_MULTIPLIER) /
-        HUNDRED_PERCENT;
-
-      const effectiveGasPriceWei = baseFeePerGasWei + maxPriorityFeePerGasWei;
-      const finalGasPriceWei =
-        effectiveGasPriceWei > maxFeePerGasWei
-          ? maxFeePerGasWei
-          : effectiveGasPriceWei;
-
-      const totalGasCostWei = gasLimit * finalGasPriceWei;
-      const totalGasCostETH = Number(formatEther(totalGasCostWei));
-      const totalGasCostUSD = totalGasCostETH * ethPrice;
-
-      setEstimatedFeeUSD(totalGasCostUSD);
-    } catch (error) {
-      console.error("Error calculating gas fee:", error);
-      setEstimatedFeeUSD(null);
-    }
-  };
 
   const handleSubmit = form.handleSubmit((data) => {
     setToAddress(data.toAddress);
@@ -188,21 +109,8 @@ const SendTokensForm: React.FC<SendTokensFormProps> = ({
     setOpenModal(true);
   });
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     try {
-      if (!gasData || !blockData) {
-        console.error("Gas data or block data is unavailable");
-        return;
-      }
-
-      const adjustedMaxPriorityFeePerGas = gasData.maxPriorityFeePerGas * 0.9;
-      const maxPriorityFeePerGasWei = BigInt(
-        Math.round(adjustedMaxPriorityFeePerGas * 1e9),
-      );
-
-      const adjustedMaxFeePerGas = gasData.maxFeePerGas * 0.9;
-      const maxFeePerGasWei = BigInt(Math.round(adjustedMaxFeePerGas * 1e9));
-
       sendTransaction({
         to: tokenAddress as `0x${string}`,
         data: encodeFunctionData({
@@ -210,9 +118,8 @@ const SendTokensForm: React.FC<SendTokensFormProps> = ({
           functionName: "transfer",
           args: [toAddress as `0x${string}`, parseEther(amount.toString())],
         }),
-        gas: gasLimit,
-        maxFeePerGas: maxFeePerGasWei,
-        maxPriorityFeePerGas: maxPriorityFeePerGasWei,
+        maxFeePerGas: maxFeePerGas,
+        maxPriorityFeePerGas: maxPriorityFeePerGas,
         type: "eip1559",
       });
     } catch (error) {
@@ -221,8 +128,9 @@ const SendTokensForm: React.FC<SendTokensFormProps> = ({
   };
 
   const handlePercentageClick = (percentage: number) => {
-    const amount = (Number(formatEther(balance)) * percentage).toString();
-    form.setValue("amount", amount);
+    const rawAmount = Number(formatEther(balance)) * percentage;
+    const roundedAmount = Number(rawAmount.toFixed(6));
+    form.setValue("amount", roundedAmount.toString());
   };
 
   useEffect(() => {
